@@ -582,6 +582,69 @@ The default output is saved in the workspace's
 `audiobook_output` directory. The converter processes one book at a time.
 Its OpenAI cost estimates do not apply to locally hosted Kokoro.
 
+#### Experimental character voices
+
+The command-line prototype in [`voice_cast.py`](./voice_cast.py) analyzes one
+chapter with OpenRouter, creates an editable voice plan, and renders it with
+Kokoro. It does not change the normal converter or its WebUI. See the
+[feature checklist](./VOICE_FEATURE_TODO.md) for limitations and planned work.
+
+**Privacy and cost:** analysis sends the selected chapter's text to OpenRouter
+and its selected model provider, and may incur charges. Check their terms and
+your model's pricing before running it. Kokoro speech stays local only when
+`OPENAI_BASE_URL` points to your local Kokoro server.
+
+With the project's Python dependencies and ffmpeg installed, run from the
+repository directory:
+
+```bash
+export OPENROUTER_API_KEY="your-openrouter-key"
+python voice_cast.py analyze path/to/book.epub chapter-plan.json \
+  --chapter 2 --model "provider/model" --narrator-voice af_bella
+```
+
+Choose an OpenRouter model that supports JSON-object responses. Chapter indexes
+match the normal converter's non-empty chapter list; inspect a chapter first if
+the book includes front matter. The plan contains the book text: keep it private.
+Review its `segments`, change incorrect `speaker` labels, and assign each named
+speaker a Kokoro voice in `voices`. Use `narrator` or `unknown` when unsure;
+`unknown` uses the narrator's voice. Delivery notes are informational and are
+**not** applied by Kokoro. Quotation detection and attribution are imperfect;
+the prototype recognizes paired straight or curly double quotes only.
+
+Then render the reviewed plan:
+
+```bash
+export OPENAI_BASE_URL="http://localhost:8880/v1"
+export OPENAI_API_KEY="not-needed"
+python voice_cast.py render chapter-plan.json chapter-02.mp3
+```
+
+The MP3 has chapter, book, author, and track tags for Audiobookshelf. Choose a
+new output name when rendering again; existing plans and MP3s are not overwritten.
+Voice continuity across chapters, expressive delivery, and a review interface
+are future work.
+
+If using the GPU Docker setup above instead of a host Python installation, the
+running converter container can run these commands against files in the mounted
+workspace. For example, from the parent workspace directory after exporting
+`OPENROUTER_API_KEY` on the host:
+
+```bash
+docker compose -f epub_to_audiobook/docker-compose.kokoro-ui.yml exec \
+  -e OPENROUTER_API_KEY -w /app/epub_to_audiobook converter \
+  python voice_cast.py analyze /app/books/book.epub /app/chapter-plan.json \
+  --chapter 2 --model "provider/model" --narrator-voice af_bella
+```
+
+Edit `chapter-plan.json` in the workspace, then run:
+
+```bash
+docker compose -f epub_to_audiobook/docker-compose.kokoro-ui.yml exec \
+  -w /app/epub_to_audiobook converter \
+  python voice_cast.py render /app/chapter-plan.json /app/chapter-02.mp3
+```
+
 The documented usage of Kokoro TTS with this script uses a docker image with endpoints that are OpenAI compatible. However, since it's a "self-hosted" service, you won't need to get an actual key. This requires docker, so follow the docker installation and setup instructions above in the Piper section if you don't have docker on your machine already.
 
 To run, in one terminal tab, run either
