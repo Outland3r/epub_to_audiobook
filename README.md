@@ -564,6 +564,24 @@ python3 main.py "path/to/book.epub" "path/to/output/folder" --tts piper --model_
 
 ### Examples using Kokoro TTS
 
+#### Local GPU and web interfaces
+
+The `docker-compose.kokoro-ui.yml` configuration runs Kokoro on an NVIDIA GPU
+and the converter's web interface. Install and configure the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+for Docker first, then run from the parent workspace directory:
+
+```bash
+docker compose -f epub_to_audiobook/docker-compose.kokoro-ui.yml up -d --build
+```
+
+Open the converter at http://localhost:7860 and click a voice to hear a sample
+and select it for conversion. Upload an EPUB and start the conversion. The
+separate Kokoro interface is also available at http://localhost:8880/web.
+The default output is saved in the workspace's
+`audiobook_output` directory. The converter processes one book at a time.
+Its OpenAI cost estimates do not apply to locally hosted Kokoro.
+
 The documented usage of Kokoro TTS with this script uses a docker image with endpoints that are OpenAI compatible. However, since it's a "self-hosted" service, you won't need to get an actual key. This requires docker, so follow the docker installation and setup instructions above in the Piper section if you don't have docker on your machine already.
 
 To run, in one terminal tab, run either

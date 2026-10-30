@@ -1,10 +1,15 @@
 from multiprocessing import Process
 from typing import Optional
 import os
+import tempfile
 from datetime import datetime
+from functools import partial
+from pathlib import Path
 
 import gradio as gr
+import requests
 from gradio_log import Log
+from openai import OpenAI
 from audiobook_generator.config.general_config import GeneralConfig
 from audiobook_generator.tts_providers.azure_tts_provider import get_azure_supported_languages, \
     get_azure_supported_voices, get_azure_supported_output_formats
@@ -17,9 +22,80 @@ from audiobook_generator.tts_providers.piper_tts_provider import get_piper_suppo
 from audiobook_generator.utils.log_handler import generate_unique_log_path
 from main import main
 
-selected_tts = "Edge"
+kokoro_ui = os.environ.get("KOKORO_UI") == "1"
+selected_tts = "OpenAI" if kokoro_ui else "Edge"
+kokoro_english_voices = [
+    "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica", "af_kore",
+    "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky", "am_adam",
+    "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael", "am_onyx",
+    "am_puck", "am_santa", "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+]
 running_process: Optional[Process] = None
 webui_log_file = None
+kokoro_preview_directory = tempfile.TemporaryDirectory(prefix="kokoro-previews-") if kokoro_ui else None
+
+def describe_kokoro_voice(voice):
+    language, accent = {
+        "a": ("English", "American"), "b": ("English", "British"),
+        "e": ("Spanish", ""), "f": ("French", ""), "h": ("Hindi", ""),
+        "i": ("Italian", ""), "j": ("Japanese", ""),
+        "p": ("Portuguese", "Brazilian"), "z": ("Mandarin Chinese", ""),
+    }.get(voice[:1], ("Other", ""))
+    gender = {"f": "Female", "m": "Male"}.get(voice[1:2], "Other")
+    voice_name = voice.split("_", 1)[-1]
+    variant = ""
+    if voice_name.startswith("v0") and len(voice_name) > 2:
+        voice_name, variant = voice_name[2:], "v0"
+    if voice_name.endswith("_inno"):
+        voice_name, variant = voice_name[:-5], "Inno"
+    name = voice_name.replace("_", " ").title()
+    if variant:
+        name = f"{name} ({variant})"
+    return language, accent, gender, name
+
+def get_kokoro_voices():
+    try:
+        response = requests.get(f"{os.environ['OPENAI_BASE_URL'].rstrip('/')}/audio/voices", timeout=10)
+        response.raise_for_status()
+        return {voice["id"]: voice.get("overall_grade") for voice in response.json()["voices"]}
+    except (KeyError, ValueError, requests.RequestException) as error:
+        print(f"Could not load Kokoro voices: {error}")
+        return dict.fromkeys(kokoro_english_voices)
+
+def kokoro_voice_label(voice):
+    name = describe_kokoro_voice(voice)[3]
+    grade = kokoro_available_voices.get(voice)
+    return f"{name} - {grade or 'Unrated'}"
+
+def kokoro_voice_sort_key(voice_entry):
+    name, voice = voice_entry
+    grades = [f"{letter}{modifier}" for letter in "ABCDEF" for modifier in ("+", "", "-")]
+    grade = kokoro_available_voices.get(voice)
+    return (grades.index(grade) if grade in grades else len(grades), name.casefold(), voice)
+
+def preview_kokoro_voice(voice):
+    if voice not in kokoro_available_voices:
+        raise gr.Error("Please select an available voice.")
+    preview_path = Path(kokoro_preview_directory.name) / f"{voice}.mp3"
+    if not preview_path.exists():
+        response = OpenAI().audio.speech.create(
+            model="tts-1", voice=voice, response_format="mp3",
+            input=(
+                'The wizard waved his wand. "Prepare to be amazed!" POOF! '
+                'A rubber duck appeared. "That was supposed to be a dragon," he whispered. '
+                'The duck stared at him. "I heard that."'
+            ),
+        )
+        preview_path.write_bytes(response.content)
+    return str(preview_path)
+
+def select_kokoro_voice(voice):
+    language, accent, gender, _ = describe_kokoro_voice(voice)
+    description = ", ".join(part for part in (language, accent, gender) if part)
+    return voice, f"{kokoro_voice_label(voice)} ({description})", None
+
+kokoro_available_voices = get_kokoro_voices() if kokoro_ui else {}
 
 def on_tab_change(evt: gr.SelectData):
     print(f"{evt.value} tab selected")
@@ -132,7 +208,10 @@ def terminate_audiobook_generator():
 def host_ui(config):
     default_output_dir = os.path.join("audiobook_output", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     print(f"Default audiobook output directory: {default_output_dir}")
-    with gr.Blocks(analytics_enabled=False, title="Epub to Audiobook Converter") as ui:
+    with gr.Blocks(analytics_enabled=False, title="Epub to Audiobook Converter", css="""
+        .kokoro-voice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+        .kokoro-voice-grid > * { min-width: 0; }
+    """) as ui:
         with gr.Row(equal_height=True):
             with gr.Column():
                 input_file = gr.File(label="Select the book file to process", file_types=[".epub"], 
@@ -174,18 +253,44 @@ def host_ui(config):
 
 
         gr.Markdown("---")
-        with gr.Tabs(selected="edge_tab_id"):
+        with gr.Tabs(selected="openai_tab_id" if kokoro_ui else "edge_tab_id"):
             with gr.Tab("OpenAI", id="openai_tab_id") as open_ai_tab:
-                gr.Markdown("It is expected that user configured: `OPENAI_API_KEY` in the environment variables. Optionally `OPENAI_API_BASE` can be set to overwrite OpenAI API endpoint.")
+                if not kokoro_ui:
+                    gr.Markdown("It is expected that user configured: `OPENAI_API_KEY` in the environment variables. Optionally `OPENAI_API_BASE` can be set to overwrite OpenAI API endpoint.")
                 with gr.Row(equal_height=True):
-                    model = gr.Dropdown(get_openai_supported_models(), label="Model", interactive=True, allow_custom_value=True)
-                    voices = gr.Dropdown(get_openai_supported_voices(), label="Voice", interactive=True, allow_custom_value=True)
+                    model = gr.Dropdown(get_openai_supported_models(), value="tts-1" if kokoro_ui else None, label="Model", interactive=True, allow_custom_value=True)
+                    if not kokoro_ui:
+                        voices = gr.Dropdown(get_openai_supported_voices(), label="Voice", interactive=True, allow_custom_value=True)
                     speed = gr.Slider(minimum=0.25, maximum=4.0, step=0.1, label="Speed", value=1.0,
                                       info="Speed of the speech, 1.0 is normal speed")
-                    openai_output_format = gr.Dropdown(get_openai_supported_output_formats(), label="Output Format", interactive=True)
+                    openai_output_format = gr.Dropdown(get_openai_supported_output_formats(), value="mp3" if kokoro_ui else None, label="Output Format", interactive=True)
+                if kokoro_ui:
+                    voices = gr.State(value="af_bella")
+                    selected_voice = gr.Textbox(value=select_kokoro_voice("af_bella")[1], label="Selected voice", interactive=False)
+                    voice_sample = gr.Audio(label="Voice sample", autoplay=True, interactive=False)
+                    gr.Markdown("Grades are Kokoro model-card ratings, not listener reviews. Unrated voices have no published grade.")
+                    voice_groups = {}
+                    for voice in kokoro_available_voices:
+                        language, accent, gender, name = describe_kokoro_voice(voice)
+                        voice_groups.setdefault(language, {}).setdefault(accent, {}).setdefault(gender, []).append((name, voice))
+                    with gr.Tabs():
+                        for language, accents in voice_groups.items():
+                            with gr.Tab(language):
+                                for accent, genders in accents.items():
+                                    if accent:
+                                        gr.Markdown(f"### {accent}")
+                                    for gender, group_voices in genders.items():
+                                        gr.Markdown(f"#### {gender}")
+                                        with gr.Row(elem_classes="kokoro-voice-grid"):
+                                            for name, voice in sorted(group_voices, key=kokoro_voice_sort_key):
+                                                voice_button = gr.Button(kokoro_voice_label(voice), size="sm")
+                                                voice_button.click(fn=partial(select_kokoro_voice, voice), inputs=None, outputs=[voices, selected_voice, voice_sample], queue=False).then(
+                                                    preview_kokoro_voice, inputs=voices, outputs=voice_sample,
+                                                    concurrency_id="kokoro-previews", concurrency_limit=1,
+                                                )
                 with gr.Row(equal_height=True):
                     instructions = gr.TextArea(label="Voice Instructions", interactive=True, lines=3,
-                                               value=get_openai_instructions_example())
+                                               value="" if kokoro_ui else get_openai_instructions_example())
                 open_ai_tab.select(on_tab_change, inputs=None, outputs=None)
             with gr.Tab("Azure", id="azure_tab_id") as azure_tab:
                 gr.Markdown("It is expected that user configured: `MS_TTS_KEY` and `MS_TTS_REGION` in the environment variables.")
