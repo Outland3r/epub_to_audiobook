@@ -15,7 +15,7 @@ def main():
     analyze.add_argument("epub", help="Input EPUB")
     analyze.add_argument("plan", help="Output JSON plan")
     analyze.add_argument("--chapter", type=int, required=True, help="1-based chapter index")
-    analyze.add_argument("--model", required=True, help="OpenRouter model supporting JSON responses")
+    analyze.add_argument("--model", default=os.environ.get("OPENROUTER_MODEL"), help="OpenRouter model supporting JSON responses (or set OPENROUTER_MODEL)")
     analyze.add_argument("--narrator-voice", default="af_bella", help="Kokoro narrator voice")
     render = commands.add_parser("render", help="Render a reviewed plan using Kokoro")
     render.add_argument("plan", help="Reviewed JSON plan")
@@ -31,6 +31,8 @@ def main():
         key = os.environ.get("OPENROUTER_API_KEY")
         if not key:
             parser.error("OPENROUTER_API_KEY is required for analysis")
+        if not args.model:
+            parser.error("Specify --model or set OPENROUTER_MODEL")
         client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=key)
         plan = create_plan(args.epub, args.chapter, client, args.model, args.narrator_voice)
         path.parent.mkdir(parents=True, exist_ok=True)

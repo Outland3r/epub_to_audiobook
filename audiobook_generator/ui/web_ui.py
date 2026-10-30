@@ -11,6 +11,7 @@ import requests
 from gradio_log import Log
 from openai import OpenAI
 from audiobook_generator.config.general_config import GeneralConfig
+from audiobook_generator.ui.voice_cast_ui import build_voice_cast_ui
 from audiobook_generator.tts_providers.azure_tts_provider import get_azure_supported_languages, \
     get_azure_supported_voices, get_azure_supported_output_formats
 from audiobook_generator.tts_providers.edge_tts_provider import get_edge_tts_supported_voices, \
@@ -411,6 +412,7 @@ def host_ui(config):
                     piper_noise_scale, piper_noise_w_scale, piper_length_scale, piper_sentence_silence
                 ],
                 outputs=None)
+        build_voice_cast_ui(input_file, output_dir, list(kokoro_available_voices) if kokoro_ui else kokoro_english_voices)
         with gr.Row():
             global webui_log_file
             webui_log_file = generate_unique_log_path("EtA_WebUI")

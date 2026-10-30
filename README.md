@@ -584,9 +584,9 @@ Its OpenAI cost estimates do not apply to locally hosted Kokoro.
 
 #### Experimental character voices
 
-The command-line prototype in [`voice_cast.py`](./voice_cast.py) analyzes one
-chapter with OpenRouter, creates an editable voice plan, and renders it with
-Kokoro. It does not change the normal converter or its WebUI. See the
+The experimental WebUI and command-line prototype analyze one chapter with
+OpenRouter, create an editable voice plan, and render it with Kokoro. The normal
+single-voice converter remains unchanged. See the
 [feature checklist](./VOICE_FEATURE_TODO.md) for limitations and planned work.
 
 **Privacy and cost:** analysis sends the selected chapter's text to OpenRouter
@@ -594,14 +594,46 @@ and its selected model provider, and may incur charges. Check their terms and
 your model's pricing before running it. Kokoro speech stays local only when
 `OPENAI_BASE_URL` points to your local Kokoro server.
 
+For the GPU Docker WebUI, copy [`example.env`](./example.env) to `.env` in the
+repository directory, then set `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`.
+Choose a model that supports JSON-object responses. The `.env` file is ignored
+by Git; don't share or commit it. The Docker configuration sets the Kokoro
+endpoint and dummy speech key inside the container automatically. Restart the
+converter after changing the environment:
+
+```bash
+docker compose -f epub_to_audiobook/docker-compose.kokoro-ui.yml up -d --build
+```
+
+In the WebUI:
+
+1. Select the EPUB and output directory at the top, then expand **Experimental:
+   character voices** below the normal Start button.
+2. Select a chapter and narrator voice, check the OpenRouter model, and click
+   **Analyze chapter**. Only this button sends the chapter for analysis.
+3. Review speaker labels in the segment table and edit the voice assignments.
+   The available Kokoro voice IDs are listed in the panel. `unknown` uses the
+   narrator voice; add a voice row if you add a speaker name.
+4. Save the reviewed plan for later, then render the chapter and play or download
+   the MP3. Choose new filenames when saving or rendering again; existing files
+   are not overwritten. Use **Load plan** to resume a saved plan.
+
+The existing voice samples in the Kokoro selector can help with choosing voices.
+Chapter numbers refer to the normal converter's non-empty chapter list and may
+include front matter. The plan contains chapter text and should be kept private.
+As with the rest of the WebUI, do not expose it to the internet.
+
 With the project's Python dependencies and ffmpeg installed, run from the
 repository directory:
 
 ```bash
-export OPENROUTER_API_KEY="your-openrouter-key"
+# Export the values from your .env or set them in your shell first.
 python voice_cast.py analyze path/to/book.epub chapter-plan.json \
-  --chapter 2 --model "provider/model" --narrator-voice af_bella
+  --chapter 2 --narrator-voice af_bella
 ```
+
+`--model` overrides `OPENROUTER_MODEL`. Host Python does not automatically load
+`.env`; export its values in your shell before starting the CLI or WebUI.
 
 Choose an OpenRouter model that supports JSON-object responses. Chapter indexes
 match the normal converter's non-empty chapter list; inspect a chapter first if

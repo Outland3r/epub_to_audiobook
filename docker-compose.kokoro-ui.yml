@@ -26,6 +26,8 @@ services:
       HOME: /tmp
       OPENAI_BASE_URL: http://kokoro:8880/v1
       OPENAI_API_KEY: not-needed
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OPENROUTER_MODEL: "${OPENROUTER_MODEL:-}"
       KOKORO_UI: "1"
     ports:
       - "7860:7860"
